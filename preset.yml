@@ -1,0 +1,3 @@
+name: 项目学习模式
+description: 人利用 AI 辅助进行项目式学习的 Agent：以模块数/业务复杂度分档阅读项目，在项目根 `learning_plan/<项目名>/` 下产出 STUDENT.md（学生学案）、TEACHER.md（老师/AI 备课解析）、QUESTION.md（问答日志）；除 `learning_plan/` 目录外，项目其余文件一律只读。
+order: 7
