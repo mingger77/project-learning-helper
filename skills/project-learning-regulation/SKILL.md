@@ -1,6 +1,6 @@
 ---
 name: project-learning-regulation
-description: 项目学习模式的行为规范（元规则）：证据可追溯、只读 + learning_plan/ 唯一可写、输出三文件命名约定、范围协商、语言风格与作答规则。
+description: 项目学习模式的行为规范（元规则）：证据可追溯、只读 + learning_plan/ 唯一可写、输出四文件命名约定、范围协商、语言风格、作答规则与检验网址规则。
 ---
 
 # project-learning-regulation（项目学习行为规范）
@@ -17,12 +17,12 @@ description: 项目学习模式的行为规范（元规则）：证据可追溯�
 
 - **除 `learning_plan/` 目录外，项目其余文件一律只读**：不修改项目源码；不运行会改变仓库状态的命令（格式化、代码生成、脚手架、依赖安装进项目）；不创建/删除 `learning_plan/` 之外的文件。
 - 需要验证命令（构建/测试/运行）时先说明用途并征得用户同意；验证产生的产物（node_modules、dist、缓存）不纳入文档；对应命令标注「已验证（时间/命令）」或「未验证」。
-- 文档只写入 `learning_plan/<项目名>/` 下的三份文件。
+- 文档只写入 `learning_plan/<项目名>/` 下的四份文件。
 
 ## R3 输出目录与命名
 
 - 根目录（即项目根）下创建 `learning_plan/`，本模式唯一可写目录。
-- 每项目一个子目录：`learning_plan/<项目名>/`，内含 `STUDENT.md`、`TEACHER.md`、`QUESTION.md`（文件名固定，拼写为 QUESTION，无 QUERTION）。
+- 每项目一个子目录：`learning_plan/<项目名>/`，内含 `STUDENT.md`、`TEACHER.md`、`QUESTION.md`、`KNOWLEDGE.md`（文件名固定；拼写为 QUESTION，无 QUERTION；KNOWLEDGE 为前置知识详解）。
 - **无 SUMMARY.md、无 `learning_plan/README.md` 索引**：事实层内容（结构/数据流/状态机）并入 TEACHER.md（§1~§5、§9）。
 - 目标文件已存在：先用 `ask_user_question` 询问（覆盖/追加/跳过），默认不覆盖。
 - 文档一律相对路径（便于移植），如 `src/core/scheduler.ts`。
@@ -37,7 +37,7 @@ description: 项目学习模式的行为规范（元规则）：证据可追溯�
 
 - 文档默认中文（用户指定语言除外）；术语首次出现给出英文原名。
 - 图表 Mermaid 优先（查看器兼容性差时 ASCII）；图节点/边标注证据（文件::符号）。
-- STUDENT.md 面向学生（浅出、任务式、含作答区）；TEACHER.md 面向 AI 与老师（证据齐全、可备课）；QUESTION.md 面向双方（追加式、保留历史）。
+- STUDENT.md 面向学生（浅出、任务式、含作答区）；TEACHER.md 面向 AI 与老师（证据齐全、可备课）；QUESTION.md 面向双方（追加式、保留历史）；KNOWLEDGE.md 面向学生（前置知识详解 + 检验网址）。
 
 ## R6 质量底线
 
@@ -53,4 +53,12 @@ description: 项目学习模式的行为规范（元规则）：证据可追溯�
 ## R8 文档间一致性
 
 - TEACHER.md 是 STUDENT.md 的来源：学案引用 TEACHER.md 的章节号（§0~§9）必须真实存在；练习编号（STUDENT.md §7 ↔ TEACHER.md §7）一一对应。
+- STUDENT.md §3 仅保留一个指向 KNOWLEDGE.md 的链接；KNOWLEDGE.md 的「已具备/可能缺失」与画像一致，知识点与 STUDENT.md §9 术语表、TEACHER.md §6 教学设计互补不冲突。
 - STUDENT.md「补充内容」源自 QUESTION.md 已答问答时，每条注明「源自 QUESTION.md 第 N 条」。
+
+## R9 检验网址（KNOWLEDGE.md 专属）
+
+- KNOWLEDGE.md 每个知识点至少 1 个官方文档网址，建议再配 1 个在线练习/测验网址。
+- 网址必须来自联网检索（web_search）的真实结果，标注来源（官方/社区）与验证状态（检索存在/未逐一点击）；**禁止编造 URL**。
+- 检索不到可靠来源：写「未找到可靠来源」并留空说明，不硬凑。
+- 网址是给学生点击检验用的，AI 不替代学生完成检验。
