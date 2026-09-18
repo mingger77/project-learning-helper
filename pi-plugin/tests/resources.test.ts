@@ -78,3 +78,19 @@ test("package.json 的 pi 清单指向存在的资源", () => {
     assert.match(readFileSync(join(root, ".pi", "extensions", "project-learning", "tools.ts"), "utf8"), new RegExp(tool));
   }
 });
+
+test("project-doc-log 规范含目录契约（三端共用同一份）", () => {
+  const skill = readFileSync(join(root, ".pi", "skills", "project-doc-log", "SKILL.md"), "utf8");
+  assert.match(skill, /## 目录/);
+  assert.match(skill, /<!-- toc:start -->/);
+  assert.match(skill, /<!-- toc:end -->/);
+  assert.match(skill, /<a id="log-N"><\/a>/);
+  assert.match(skill, /- \[N\. <事情>\]\(#log-N\) —— <性质>\/<状态>/);
+  // 另两端的副本由 sync-variants 保证逐字节一致（npm run check:variants）
+  for (const other of [
+    join(root, "..", "opencode-variant", ".opencode", "skills", "project-doc-log", "SKILL.md"),
+    join(root, "..", "project-learning-preset", "skills", "project-doc-log", "SKILL.md"),
+  ]) {
+    assert.equal(readFileSync(other, "utf8"), skill, `${other} 应与 canonical 一致`);
+  }
+});

@@ -25,7 +25,7 @@
 learning_plan/<项目名>/
 ├── MAP.md        # 指路：总目标 / 驱动问题 / ## Labs（驱动问题·状态·评分·LAB.md 链接）
 ├── PROFILE.md    # 我是谁：画像 + 实验评分偏好 + 前置自检（与 MAP 同等重要）
-├── LOG.md        # 发生了什么：性质 onboarding|ask|grade|completion|commit
+├── LOG.md        # 发生了什么：追加式流水（含「## 目录」跳转，自动维护）；性质 onboarding|ask|grade|completion|commit
 ├── labs/NN-<slug>/
 │   ├── LAB.md              # handout（目标概念/驱动问题/背景/规则/评分构成/四层提示/交付物）
 │   ├── lab.config.json     # tests + rules + threshold + repoRoot（生成后 AI 不得改）

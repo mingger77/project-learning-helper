@@ -5,20 +5,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   LOG_TEMPLATE,
+  LOG_TOC_EMPTY,
+  LOG_TOC_END,
+  LOG_TOC_START,
   appendLogEntryFile,
   computeLabWeights,
   createLabScaffold,
+  ensureLogAnchors,
   formatLogEntry,
   formatMapLabBlock,
   formatStatusLine,
+  formatStatusReport,
+  logAnchor,
   nextLogIndex,
+  normalizeLogText,
   parseLog,
   parseMap,
   parseProfile,
   readLastResult,
+  renderLogToc,
   renderTemplate,
   slugify,
   summarize,
+  syncLogTocFile,
   upsertGradingBlock,
   upsertLabStatus,
   type GradeResult,
@@ -116,6 +125,7 @@ test("formatLogEntry / parseLog 支持 grade 性质", () => {
     refs: "Lab 1",
     evidence: "85/100（阈值 100）",
   });
+  assert.match(block, /<a id="log-3"><\/a>/);
   const parsed = parseLog(`${LOG_TEMPLATE}${block}`);
   assert.equal(parsed.length, 1);
   assert.equal(parsed[0].kind, "grade");
@@ -123,7 +133,45 @@ test("formatLogEntry / parseLog 支持 grade 性质", () => {
   assert.equal(nextLogIndex(parsed), 4);
 });
 
-test("appendLogEntryFile 追加式、编号递增、不改历史", () => {
+test("LOG_TEMPLATE 含目录区块与 markers", () => {
+  assert.match(LOG_TEMPLATE, /## 目录/);
+  assert.match(LOG_TEMPLATE, /<!-- toc:start -->/);
+  assert.match(LOG_TEMPLATE, /<!-- toc:end -->/);
+  assert.match(LOG_TEMPLATE, /（暂无条目）/);
+  assert.match(LOG_TEMPLATE, /## 消息/);
+});
+
+test("renderLogToc：空占位、格式与转义", () => {
+  assert.equal(renderLogToc([]), LOG_TOC_EMPTY);
+  const toc = renderLogToc([
+    { index: 2, matter: "跑分", kind: "grade", status: "done", refs: "", evidence: "" },
+    { index: 1, matter: "看 [入口] 代码", kind: "ask", status: "doing", refs: "", evidence: "" },
+  ]);
+  const lines = toc.split("\n");
+  assert.equal(lines.length, 2);
+  assert.equal(lines[0], "- [1. 看 \\[入口\\] 代码](#log-1) —— ask/doing");
+  assert.equal(lines[1], "- [2. 跑分](#log-2) —— grade/done");
+});
+
+test("parseLog 忽略目录区块，不把目录当条目", () => {
+  const text = `${LOG_TEMPLATE}\n${logAnchor(1)}\n1. 采集画像\n- 事情： 采集画像\n- 性质： onboarding\n- 状态： done\n- 关联： 画像\n- 证据/结果： PROFILE.md\n`;
+  const withToc = normalizeLogText(text);
+  assert.match(withToc, /- \[1\. 采集画像\]\(#log-1\) —— onboarding\/done/);
+  const parsed = parseLog(withToc);
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].index, 1);
+  assert.equal(parsed[0].kind, "onboarding");
+});
+
+test("normalizeLogText 幂等", () => {
+  const raw = "# LOG.md\n\n## 消息\n\n1. a\n- 事情： a\n- 性质： ask\n- 状态： doing\n- 关联： Q1\n- 证据/结果： -\n";
+  const once = normalizeLogText(raw);
+  const twice = normalizeLogText(once);
+  assert.equal(twice, once);
+  assert.equal(normalizeLogText(twice), twice);
+});
+
+test("appendLogEntryFile 追加式、编号递增、自动维护目录与锚点", () => {
   const { cwd, cleanup } = tempProject();
   try {
     const dir = join(cwd, PLAN_DIR, "demo");
@@ -136,9 +184,70 @@ test("appendLogEntryFile 追加式、编号递增、不改历史", () => {
     assert.match(text, /1\. 采集画像/);
     assert.match(text, /2\. 跑分/);
     assert.match(text, /- 性质： grade/);
+    assert.match(text, /<a id="log-1"><\/a>/);
+    assert.match(text, /<a id="log-2"><\/a>/);
+    assert.match(text, /- \[1\. 采集画像\]\(#log-1\) —— onboarding\/done/);
+    assert.match(text, /- \[2\. 跑分\]\(#log-2\) —— grade\/done/);
+    // 目录不污染解析
+    const parsed = parseLog(text);
+    assert.equal(parsed.length, 2);
+    assert.deepEqual(parsed.map((e) => e.index), [1, 2]);
   } finally {
     cleanup();
   }
+});
+
+test("旧格式 LOG.md 首次触碰时补齐目录与锚点，且不改写历史条目", () => {
+  const { cwd, cleanup } = tempProject();
+  try {
+    const dir = join(cwd, PLAN_DIR, "demo");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "LOG.md");
+    const legacy = "# LOG.md ---- 项目学习日志\n\n## 消息\n\n1. 旧条目一\n- 事情： 旧条目一\n- 性质： onboarding\n- 状态： done\n- 关联： 画像\n- 证据/结果： PROFILE.md\n\n2. 旧条目二\n- 事情： 旧条目二\n- 性质： ask\n- 状态： doing\n- 关联： Q1\n- 证据/结果： 待答\n";
+    writeFileSync(path, legacy, "utf8");
+    assert.equal(appendLogEntryFile(path, { matter: "新条目", kind: "grade", refs: "Lab 1", evidence: "60/100" }), 3);
+    const text = readFileSync(path, "utf8");
+    assert.match(text, /## 目录/);
+    assert.match(text, /- \[1\. 旧条目一\]\(#log-1\) —— onboarding\/done/);
+    assert.match(text, /- \[2\. 旧条目二\]\(#log-2\) —— ask\/doing/);
+    assert.match(text, /- \[3\. 新条目\]\(#log-3\) —— grade\/done/);
+    assert.match(text, /<a id="log-1"><\/a>\n1\. 旧条目一/);
+    assert.match(text, /<a id="log-2"><\/a>\n2\. 旧条目二/);
+    // 历史条目事实字段未被改写
+    assert.match(text, /1\. 旧条目一\n- 事情： 旧条目一\n- 性质： onboarding\n- 状态： done\n- 关联： 画像\n- 证据\/结果： PROFILE.md/);
+    assert.match(text, /2\. 旧条目二\n- 事情： 旧条目二\n- 性质： ask\n- 状态： doing\n- 关联： Q1\n- 证据\/结果： 待答/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("syncLogTocFile：状态改动后刷新目录，无改动返回 false", () => {
+  const { cwd, cleanup } = tempProject();
+  try {
+    const dir = join(cwd, PLAN_DIR, "demo");
+    mkdirSync(dir, { recursive: true });
+    const path = join(dir, "LOG.md");
+    writeFileSync(path, LOG_TEMPLATE, "utf8");
+    appendLogEntryFile(path, { matter: "提了一个问题", kind: "ask", refs: "Q1", evidence: "待答" });
+    assert.match(readFileSync(path, "utf8"), /- \[1\. 提了一个问题\]\(#log-1\) —— ask\/doing/);
+    assert.equal(syncLogTocFile(path), false);
+
+    const edited = readFileSync(path, "utf8").replace("- 状态： doing", "- 状态： done");
+    writeFileSync(path, edited, "utf8");
+    assert.equal(syncLogTocFile(path), true);
+    assert.match(readFileSync(path, "utf8"), /- \[1\. 提了一个问题\]\(#log-1\) —— ask\/done/);
+    assert.equal(syncLogTocFile(path), false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("ensureLogAnchors 幂等且不动目录区块", () => {
+  const raw = "## 目录\n\n<!-- toc:start -->\n- [1. a](#log-1) —— ask/doing\n<!-- toc:end -->\n\n## 消息\n\n1. a\n";
+  const once = ensureLogAnchors(raw);
+  assert.equal(once, ensureLogAnchors(once));
+  assert.match(once, /<a id="log-1"><\/a>\n1\. a/);
+  assert.doesNotMatch(once, /- <a id="log-1">/);
 });
 
 test("parseProfile 解析严格度与 Lab 粒度", () => {
@@ -289,6 +398,28 @@ test("buildModeBlock 含 Lab 五要素、R9 与当前 Lab 状态", () => {
     assert.match(block, /R9|不得修改/);
     assert.match(block, /当前 Lab：Lab 1 看懂主链路/);
     assert.match(block, /不要创建 KNOWLEDGE\.md 或 stages/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("formatStatusReport 不把目录当条目（回归）", () => {
+  const { cwd, cleanup } = tempProject();
+  try {
+    const dir = join(cwd, PLAN_DIR, "demo");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "MAP.md"), MAP_SAMPLE, "utf8");
+    const logFile = join(dir, "LOG.md");
+    writeFileSync(logFile, LOG_TEMPLATE, "utf8");
+    appendLogEntryFile(logFile, { matter: "提了一个问题", kind: "ask", refs: "Q1", evidence: "待答" });
+    appendLogEntryFile(logFile, { matter: "Lab 1 跑分", kind: "grade", refs: "Lab 1", evidence: "60/100" });
+
+    const report = formatStatusReport(summarize(cwd, PLAN_DIR, "demo"));
+    assert.doesNotMatch(report, /\]\(#log-/);
+    assert.match(report, /待答问题：/);
+    assert.match(report, /LOG#1：提了一个问题/);
+    assert.match(report, /最近日志：/);
+    assert.match(report, /#2 \[grade\/done\] Lab 1 跑分/);
   } finally {
     cleanup();
   }

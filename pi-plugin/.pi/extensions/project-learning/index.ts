@@ -11,10 +11,10 @@
  * 非学习会话零影响：不注入提示、不拦截、无状态栏。
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+import { isToolCallEventType, withFileMutationQueue } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { decideWrite, isGitCommitCommand } from "./guard.ts";
-import { formatStatusLine, formatStatusReport, summarize } from "./plan.ts";
+import { decideWrite, isGitCommitCommand, isInside, normalizeToolPath, resolvePlanRoot } from "./guard.ts";
+import { formatStatusLine, formatStatusReport, summarize, syncLogTocFile } from "./plan.ts";
 import { buildModeBlock } from "./prompt.ts";
 import { LearningRuntime } from "./runtime.ts";
 import { clearStatus, refreshStatus } from "./status.ts";
@@ -114,11 +114,21 @@ export default function projectLearning(pi: ExtensionAPI): void {
     }
   });
 
-  /* ── 文档改动后刷新状态栏 ── */
+  /* ── 文档改动后：刷新状态栏；LOG.md 额外重算目录 ── */
   pi.on("tool_result", async (event, ctx) => {
     if (!runtime.isActive()) return;
     if (event.toolName !== "write" && event.toolName !== "edit") return;
     if (!touchesPlanDoc(event.input)) return;
+
+    const raw = pathOf(event.input);
+    if (raw && /(^|[\\/])LOG\.md$/.test(raw)) {
+      const abs = normalizeToolPath(raw, ctx.cwd);
+      if (isInside(resolvePlanRoot(ctx.cwd, runtime.planDir), abs)) {
+        await withFileMutationQueue(abs, async () => {
+          syncLogTocFile(abs);
+        });
+      }
+    }
     refresh(ctx);
   });
 

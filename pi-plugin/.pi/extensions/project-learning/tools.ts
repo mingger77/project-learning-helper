@@ -181,7 +181,7 @@ export function registerLearningTools(pi: ExtensionAPI, runtime: LearningRuntime
       );
       refresh(ctx);
       return {
-        content: [{ type: "text", text: `已追加 LOG.md 第 ${index} 条（性质 ${params.kind}）。路径：${path}` }],
+        content: [{ type: "text", text: `已追加 LOG.md 第 ${index} 条（性质 ${params.kind}），目录已同步。路径：${path}` }],
         details: { entry: index, path },
       };
     },

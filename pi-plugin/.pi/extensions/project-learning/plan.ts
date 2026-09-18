@@ -276,11 +276,22 @@ export function readMap(cwd: string, planDir: string, project: string): MapInfo 
 
 /* ─────────────────────────── LOG 解析/渲染 ─────────────────────────── */
 
+export const LOG_TOC_START = "<!-- toc:start -->";
+export const LOG_TOC_END = "<!-- toc:end -->";
+/** 空目录占位文本。 */
+export const LOG_TOC_EMPTY = "（暂无条目）";
+
 export const LOG_TEMPLATE = `# LOG.md ---- 项目学习日志
 
 > 本文档为项目 <项目名> 的学习日志：按时间追加，不删改历史。
 > 性质五类：onboarding（画像）/ ask（提问）/ grade（跑分）/ completion（完成）/ commit（提交）。
 > 优先用 learning_log 工具追加条目，避免手写破坏格式。
+
+## 目录
+
+${LOG_TOC_START}
+${LOG_TOC_EMPTY}
+${LOG_TOC_END}
 
 ## 消息
 
@@ -288,16 +299,19 @@ export const LOG_TEMPLATE = `# LOG.md ---- 项目学习日志
 
 const ENTRY_HEAD = /^(\d+)\.\s*(.*)$/;
 const FIELD_LINE = /^[-*]\s*(事情|性质|状态|关联|证据\/结果)\s*[：:]\s*(.*)$/;
+const TOC_HEADING = /^##\s*目录\s*$/;
 
 export function formatLogEntry(index: number, entry: LogEntryInput): string {
   const status = entry.status ?? (entry.kind === "ask" ? "doing" : "done");
   return [
+    logAnchor(index),
     `${index}. ${entry.matter}`,
     `- 事情： ${entry.matter}`,
     `- 性质： ${entry.kind}`,
     `- 状态： ${status}`,
     `- 关联： ${entry.refs}`,
     `- 证据/结果： ${entry.evidence}`,
+    "",
     "",
   ].join("\n");
 }
@@ -308,12 +322,22 @@ export function parseLog(markdown: string | undefined): LogEntry[] {
   if (typeof markdown !== "string" || markdown.trim() === "") return entries;
 
   let current: LogEntry | undefined;
+  let inToc = false;
   const push = () => {
     if (current) entries.push(current);
     current = undefined;
   };
 
   for (const line of markdown.split(/\r?\n/)) {
+    if (line.trim() === LOG_TOC_START) {
+      inToc = true;
+      continue;
+    }
+    if (line.trim() === LOG_TOC_END) {
+      inToc = false;
+      continue;
+    }
+    if (inToc) continue;
     const head = ENTRY_HEAD.exec(line);
     if (head) {
       push();
@@ -370,6 +394,118 @@ export function ensureLogFile(cwd: string, planDir: string, project: string): bo
   return true;
 }
 
+/* ────────────────── LOG 目录（跳转链接，自动维护） ────────────────── */
+
+/** 条目的 HTML 锚点行（GitHub / VSCode / Typora 均稳定）。 */
+export function logAnchor(index: number): string {
+  return `<a id="log-${index}"></a>`;
+}
+
+function escapeLinkText(text: string, max = 80): string {
+  const flat = String(text ?? "")
+    .replace(/\r?\n/g, " ")
+    .replace(/\\/g, "\\\\")
+    .replace(/\[/g, "\\[")
+    .replace(/\]/g, "\\]")
+    .trim();
+  return flat.length <= max ? flat : `${flat.slice(0, max - 1)}…`;
+}
+
+/** 渲染目录正文（不含 markers）。 */
+export function renderLogToc(entries: LogEntry[]): string {
+  if (entries.length === 0) return LOG_TOC_EMPTY;
+  return entries
+    .slice()
+    .sort((a, b) => a.index - b.index)
+    .map((entry) => {
+      const kind = entry.kind || "—";
+      const status = entry.status || "—";
+      const label = escapeLinkText(entry.matter || `条目 ${entry.index}`);
+      return `- [${entry.index}. ${label}](#log-${entry.index}) —— ${kind}/${status}`;
+    })
+    .join("\n");
+}
+
+/** 幂等地更新/插入「## 目录」区块（用 markers 定位）。 */
+export function upsertLogToc(text: string, entries: LogEntry[]): string {
+  const body = `${LOG_TOC_START}\n${renderLogToc(entries)}\n${LOG_TOC_END}`;
+  const start = text.indexOf(LOG_TOC_START);
+  const end = text.indexOf(LOG_TOC_END);
+  if (start !== -1 && end !== -1 && end > start) {
+    return `${text.slice(0, start)}${body}${text.slice(end + LOG_TOC_END.length)}`;
+  }
+
+  const lines = text.split(/\r?\n/);
+  const tocIdx = lines.findIndex((line) => TOC_HEADING.test(line));
+  if (tocIdx !== -1) {
+    // 已有「## 目录」但没有 markers：整段替换（到下一个 1~2 级标题为止）
+    let endIdx = lines.length;
+    for (let i = tocIdx + 1; i < lines.length; i += 1) {
+      if (/^#{1,2}\s/.test(lines[i])) {
+        endIdx = i;
+        break;
+      }
+    }
+    const head = lines.slice(0, tocIdx);
+    const tail = lines.slice(endIdx);
+    return [...head, "## 目录", "", ...body.split("\n"), "", ...tail].join("\n");
+  }
+
+  // 全新插入：置于第一个「## 」标题（通常是「## 消息」）之前
+  let insertIdx = lines.findIndex((line) => /^##\s/.test(line));
+  if (insertIdx === -1) insertIdx = lines.length;
+  const head = lines.slice(0, insertIdx);
+  while (head.length > 0 && head[head.length - 1].trim() === "") head.pop();
+  const tail = lines.slice(insertIdx);
+  return [...head, "", "## 目录", "", ...body.split("\n"), "", ...tail].join("\n");
+}
+
+/** 为缺少锚点的条目补一行 `<a id="log-N"></a>`（目录区块内不动）。 */
+export function ensureLogAnchors(text: string): string {
+  const lines = text.split(/\r?\n/);
+  const out: string[] = [];
+  let inToc = false;
+  for (const line of lines) {
+    if (line.trim() === LOG_TOC_START) {
+      inToc = true;
+      out.push(line);
+      continue;
+    }
+    if (line.trim() === LOG_TOC_END) {
+      inToc = false;
+      out.push(line);
+      continue;
+    }
+    if (!inToc) {
+      const head = ENTRY_HEAD.exec(line);
+      if (head) {
+        const anchor = logAnchor(Number(head[1]));
+        let prev = out.length - 1;
+        while (prev >= 0 && out[prev].trim() === "") prev -= 1;
+        if (prev < 0 || out[prev].trim() !== anchor) out.push(anchor);
+      }
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** 幂等归一化：补锚点 + 重算目录（不改写任何历史条目文本）。 */
+export function normalizeLogText(text: string): string {
+  const anchored = ensureLogAnchors(text);
+  return upsertLogToc(anchored, parseLog(anchored));
+}
+
+/** 同步某个 LOG.md 的目录；返回是否发生改动。 */
+export function syncLogTocFile(path: string): boolean {
+  const text = readIfExists(path);
+  if (text === undefined) return false;
+  const next = normalizeLogText(text);
+  if (next === text) return false;
+  writeFileSync(path, next, "utf8");
+  return true;
+}
+
 /** 追加一条 LOG 条目；返回条目编号。调用方负责用文件队列包裹（见 tools.ts）。 */
 export function appendLogEntryFile(path: string, entry: LogEntryInput): number {
   const existing = parseLog(readIfExists(path));
@@ -377,7 +513,7 @@ export function appendLogEntryFile(path: string, entry: LogEntryInput): number {
   const block = formatLogEntry(index, entry);
   const text = readIfExists(path) ?? LOG_TEMPLATE;
   const needsNewline = text.endsWith("\n") ? "" : "\n";
-  writeFileSync(path, `${text}${needsNewline}${block}`, "utf8");
+  writeFileSync(path, normalizeLogText(`${text}${needsNewline}${block}`), "utf8");
   return index;
 }
 

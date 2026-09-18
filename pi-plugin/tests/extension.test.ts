@@ -237,6 +237,9 @@ test("端到端：learning_lab 生成 Lab → learning_grade 跑分并回写 MAP
     const log = readFileSync(join(cwd, "learning_plan", "demo", "LOG.md"), "utf8");
     assert.match(log, /- 性质： grade/);
     assert.match(log, /100\/100（阈值 100）已达标/);
+    assert.match(log, /## 目录/);
+    assert.match(log, /- \[1\. Lab 1 跑分：100\/100\]\(#log-1\) —— grade\/done/);
+    assert.match(log, /<a id="log-1"><\/a>\n1\. Lab 1 跑分/);
     assert.equal(ctx.statuses.at(-1)?.[1]?.includes("100/100"), true);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
@@ -303,10 +306,47 @@ test("learning_log 追加并校验字段", async () => {
       ctx,
     );
     assert.match(ok.content[0].text, /第 1 条/);
+    assert.match(ok.content[0].text, /目录已同步/);
+    const text = readFileSync(join(cwd, "learning_plan", "demo", "LOG.md"), "utf8");
+    assert.match(text, /- \[1\. 采集画像\]\(#log-1\) —— onboarding\/done/);
     await assert.rejects(
       () => log.execute("id", { project: "demo", matter: "x", kind: "grade", refs: "", evidence: "" }, undefined, undefined, ctx),
       /refs 不能为空/,
     );
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test("LOG.md 被编辑后 tool_result 自动重算目录（状态 doing → done）", async () => {
+  const cwd = mkdtempSync(join(tmpdir(), "pi-pl-ext-"));
+  try {
+    seedMap(cwd);
+    const { pi, emit, tools } = createMockPi();
+    projectLearning(pi as any);
+    const ctx = createMockCtx(cwd);
+    await emit("session_start", { reason: "startup" }, ctx);
+    await emit("input", { source: "interactive", text: "/read" }, ctx);
+
+    const logTool = tools.find((t) => t.name === "learning_log");
+    await logTool.execute(
+      "id",
+      { project: "demo", matter: "提了一个问题", kind: "ask", refs: "Q1", evidence: "待答" },
+      undefined,
+      undefined,
+      ctx,
+    );
+    const logFile = join(cwd, "learning_plan", "demo", "LOG.md");
+    assert.match(readFileSync(logFile, "utf8"), /- \[1\. 提了一个问题\]\(#log-1\) —— ask\/doing/);
+
+    // 模拟模型用 edit 把状态改成 done
+    writeFileSync(logFile, readFileSync(logFile, "utf8").replace("- 状态： doing", "- 状态： done"), "utf8");
+    await emit(
+      "tool_result",
+      { toolName: "edit", input: { path: "learning_plan/demo/LOG.md" } },
+      ctx,
+    );
+    assert.match(readFileSync(logFile, "utf8"), /- \[1\. 提了一个问题\]\(#log-1\) —— ask\/done/);
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }

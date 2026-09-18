@@ -46,7 +46,7 @@
 learning_plan/<项目名>/
 ├── MAP.md        # 指路：总目标 / 驱动问题 / ## Labs（驱动问题·状态·评分·LAB.md 链接）
 ├── PROFILE.md    # 我是谁：画像 + 实验评分偏好 + 前置自检
-├── LOG.md        # 发生了什么：追加式（onboarding|ask|grade|completion|commit）
+├── LOG.md        # 发生了什么：追加式（含「## 目录」跳转，按 project-doc-log 规范维护；onboarding|ask|grade|completion|commit）
 ├── labs/NN-<slug>/{LAB.md, lab.config.json, scaffold/, autograder/{check-rules.mjs,grade.mjs,last-result.json}, REPORT.md}
 └── others/       # 项目解析.md：事实层 + 验证命令清单 + 可实验点清单 + 概念速查
 ```
