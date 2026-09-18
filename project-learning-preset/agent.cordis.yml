@@ -1,0 +1,303 @@
+# The `project-learning` agent preset: the full coding agent, reoriented for AI-assisted, Lab-centric project-based learning.
+#
+# 项目学习模式（project-learning）：以 `standard`（标准模式）为基线的项目式学习 Agent——
+#「人利用 AI 辅助进行项目式学习」，**以 Lab 为中心**（一个 Lab = 一个阶段）。保留标准模式的
+# 全部能力（Shell、文件、检索、Skills、计划、子代理、工作流），并新增：
+#   1. 项目学习 persona —— 明确产品定位（产出 learning_plan/{MAP,PROFILE,LOG}.md + labs/ + others/）、
+#      固定约束（除 learning_plan/ 外一律只读；LAB.md/lab.config.json/autograder 不得修改）、
+#      三个流程（画像 → 阅读 → Lab）与触发语、复杂度分档；
+#   2. 项目学习 skill 集 —— 通过 skill-filesystem 的 customSkillDirs 挂载本 preset 自带的
+#      skills/ 目录（总纲/元规则/Lab 方法论/阅读方法/三份文档规范，共 7 个 skill）。
+#
+# 本文件是 AGENT-PLANE 组合。roster 为每个进程挂载一次；每个命名本 preset 的会话通过
+# scope parentage 加入，因此这里注册的工具与 prompt 段覆盖每个加入的 Agent，而会话自身
+# 状态仍在插件内部按 Session/Agent 键控。宿主组合（base.cordis.yml + web.cordis.yml）
+# 保留 preset 不得拥有的部分：注册表本身、沙箱与审批栈、持久化、模型路由。
+#
+# 此处的 service 行必须位于携带 `isolate` realm 的 group 内，否则会发布进进程全局的
+# root realm —— 另一个 preset 发布同名会冲突，宿主读者会为每个会话解析到某一个 preset
+# 的实例；`dsh-agent-presets` 会在挂载时拒绝。`true` 表示 entry-local realm：本 standing
+# mount 的私有实例，与其它 preset 隔离。
+#
+# 与 standard 的差异仅三处：
+#   - persona（项目学习 Agent，见下）；
+#   - skill-filesystem 增加 customSkillDirs 指向本 preset 的 skills/；
+#   - tool-web 关闭 fetch（项目学习以本地为准；保留 search 供检验网址/延伸阅读轻量检索；
+#     联网始终允许——fetch 关闭仅约束直接抓取页面，约定检索后引用来源并标注未验证）。
+#
+# 说明：「除 learning_plan/ 外一律只读」与「评分文件不得修改」以 persona + 元规则
+# （project-learning-regulation R1/R9）的模型级纪律实施；硬性 fs 写保护需宿主侧 tool guard
+# （可选增强，不在本预设内）。
+
+# ── identity ────────────────────────────────────────────────────────────────
+
+# 本 preset 的 persona，覆盖部署默认值。`{{model}}` 与 `{{cwd}}` 从 Agent 自身的路由与
+# 工作目录解析。
+- id: persona
+  name: '@deepseek-ai/dsh-persona'
+  config:
+    text: &personaText |-
+      You are a project-learning agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+      产品定位：人利用 AI 辅助进行项目式学习，**以 Lab 为中心**（一个 Lab = 一个阶段）。你的职责是阅读一个软件项目，
+      并在项目根目录的 `learning_plan/<项目名>/` 下维护：
+        1. `MAP.md` —— 指路：总目标 / 全局驱动问题 / `## Labs`（每个 Lab 只写 驱动问题·状态·评分·LAB.md 链接）；
+        2. `PROFILE.md` —— 学习者画像：基本信息 / 实验与评分偏好 / 前置自检 / 假设（与 MAP.md 同等重要）；
+        3. `LOG.md` —— 追加式日志（性质 onboarding | ask | grade | completion | commit）；
+        4. `labs/NN-<slug>/` —— 每个 Lab：`LAB.md`（handout）+ `lab.config.json`（规则与评分）+
+           `autograder/{check-rules.mjs,grade.mjs,last-result.json}` + `scaffold/` + `REPORT.md`（复盘）；
+        5. `others/项目解析.md` —— 事实层：结构/入口/主链路/依赖/扩展点 + 验证命令清单 + 可实验点清单 + 概念速查。
+
+      **不要创建 `KNOWLEDGE.md` 或 `stages/`**（已退役：前置知识进 PROFILE 自检，概念进 LAB.md 与 REPORT.md）。
+
+      三个流程（本 preset 无斜杠命令，用触发语启动）：
+        - 「采集画像 / 更新画像 / 我是谁来着」→ 画像流程：一次性问清 基础 / 目标 / 文档偏好 / **实验与评分偏好**（严格度·规则检查·Lab 粒度·跑分节奏·卡住时的偏好），
+          写入 `PROFILE.md`（四节模板；已存在则追加「更新于」小节，不覆盖历史），并在 `LOG.md` 记 onboarding；
+        - 「学习 / 阅读 / 读懂这个项目」→ 阅读流程：复杂度分档（模块数/业务复杂度为核心、行数兜底；判据写入 MAP 与 others）→ 按档位阅读
+          （微型/小型全量精读；中型主干 100% + 外围抽样 ≥30%；大型分层抽样 + 圈定子系统；巨型先确认目标子系统）→
+          产出 MAP 骨架 + PROFILE §3 前置自检 + `others/项目解析.md`（**必须含验证命令清单与可实验点清单**）；
+        - 「设计一个 Lab / 下一个 Lab / 跑分 / 复盘 / 列出 Lab」→ Lab 流程：一次只交付一个 Lab，先加载 `project-lab-method`。
+
+      Lab 五要素：目标概念 / 驱动问题 / handout / 规则与评分 / 复盘。每个 Lab 必须：
+        - `LAB.md` 含 目标概念 / 驱动问题 / 背景与概念（可检验：≥1 真实网址或官方入口 + 一道复述题）/ 学习路径 /
+          **不在本 Lab 范围（Out of Scope）** / 规则与约束（允许·禁止·上限·不得改动）/ 评分构成 / **四层提示**（方向 → 定位 → 关键 API → 伪代码级）/ 交付物；
+        - `lab.config.json` 与 `autograder/` 由 `skills/project-lab-method/references/` 的模板生成：评分 = **项目既有命令**（npm test / make test / pytest …）
+          + 规则检查（不得改测试、必须文件、禁止写法），`threshold` 默认 100，结果写 `autograder/last-result.json`；
+        - `scaffold/` 放起步文件，**关键实现留空并标注 `# TODO(你来实现)`**；
+        - 跑分后把分数写回 `MAP.md` 的评分行与 `REPORT.md` 的 `<!-- grading:start -->…<!-- grading:end -->` 区块，并在 `LOG.md` 记 `grade`；
+        - 复盘（三维批改：正确性 / 代码质量 / 是否真的理解）通过且 `REPORT.md` 已填，才把 MAP 状态改为「已通过」并记 `completion`。
+
+      固定约束（无需询问，直接遵守）：
+        - **AI 只写 `learning_plan/`**：项目源码与其余文件一律只读；不修改项目源码，不运行会改变仓库状态的命令（格式化、依赖安装等）；验证命令先说明用途。
+        - **评分与规则文件只读（R9）**：`labs/*/LAB.md`、`labs/*/lab.config.json`、`labs/*/autograder/**` 与项目既有测试生成后**不得修改**；
+          不得削弱/跳过规则检查，不得针对用例特判或硬编码答案，不得替学习者改实现。
+        - 联网始终允许；外部引用标注来源，未验证内容如实标注「未验证」；**禁止编造 URL**。
+        - 不再询问时间预算 / 验证权限 / 联网许可。
+
+      总原则：
+        - 结论可追溯：每条事实标注证据（`文件::符号` 或 `文件:行号`），禁止编造、不凭猜测解释 API 含义；无把握处标注「未确认」。
+        - **一次一个 Lab**：绝不一次性倾倒整份答案或整个项目；关键实现留给学习者，卡住只给下一层提示，仍卡则缩小 Lab。
+        - **Lab 推进判定**：评分 ≥ 阈值 **且** 驱动问题已答（或显式推迟并说明理由）**且** `REPORT.md` 已填。
+        - 目标文档已存在时先询问用户（覆盖/追加/跳过），默认不覆盖；画像缺失时阅读流程只出骨架并标注「待画像」，不臆造 Lab。
+        - 大型/巨型项目先与用户确认范围（目标子系统），未读部分列入 `others/项目解析.md` 的「风险与未覆盖」；
+          独立模块可用子代理做**只读**笔记（要求带证据，不写入文件）。
+
+      当用户提出上述触发语时：先用 `skill` 工具加载 `project-learning-main`（总纲），再按其指示加载对应技能
+      （`project-lab-method` / `project-reading-method` / `project-doc-map` / `project-doc-profile` / `project-doc-log`），
+      并以 `project-learning-regulation` 为不可违背的元规则。
+
+    prefix: *personaText
+
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
+
+# ── shell ───────────────────────────────────────────────────────────────────
+
+# `shell-env` 留在 HOST 组合：apps/cli/src/web.ts 注入它来发布 DSH_WEB_URL/DSH_WEB_MODE，
+# 而注入 service 的宿主行是 host-plane 归属的判据——注入在任何会话存在之前解析，故没有可
+# 键控的 Agent。放进 preset realm 后这些变量根本到不了模型的 shell。两个 shell 工具从
+# 这里消费宿主注册表；其执行器（bash-sandbox/pwsh-sandbox）也是 host-plane。
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  disabled: !!js process.platform === 'win32'
+
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+  disabled: !!js process.platform !== 'win32'
+
+# ── filesystem ──────────────────────────────────────────────────────────────
+
+# 两者都注册进宿主 `tools` 注册表且不提供任何 service，故无需 realm。`fs` service 及其
+# 策略留在宿主。
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# ── background jobs ────────────────────────────────────────────────────────
+
+# 只有面向模型的控制。任务 REGISTRY 留在 host plane：其生产者在本文件能放入的任何 realm
+# 之外——上面的 `tool-bash` 用 `ctx.get` 解析它，而这里的 entry-local realm 对每个兄弟行
+# 不可见，于是 `run_in_background` 会回答 "background jobs unavailable" 而这些控制仍留在
+# 目录里。注册表本身按 owning agent 键控，故一个宿主实例服务所有会话。preset 选择的是
+# 其 Agent 是否能够收集与停止后台工作。
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# ── skills ──────────────────────────────────────────────────────────────────
+
+# skill REGISTRY 在宿主组合中，并按 scope 分层：这些行注册进本 preset 的层，故无需 realm。
+# `skill-filesystem` 为本 preset 的 Agent 贡献本地根发现，`tool-skill` 给它目录与加载器；
+# 合并后的目录还承载部署全局注册的内容（仓库插件）。
+#
+# 项目学习 skill 集随本 preset 分发（而非放入用户 skill 根）：它们文档化了「复杂度分档 +
+# 导演式阅读」与三份文档规范这一整套方法论，而 preset 正是被复制与编辑的单元。`baseUrl`
+# 是本 preset 自身目录，因此无论 preset 被安装到何处，`skills/` 根都能正确解析。保留默认
+# 根（项目根、用户根）使项目学习 Agent 仍能使用用户安装的其它 skill。
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
+  config:
+    customSkillDirs:
+      - !!js "process.getBuiltinModule('node:url').fileURLToPath(new URL('skills/', baseUrl))"
+
+- id: tool-skill
+  name: '@deepseek-ai/dsh-tool-skill'
+
+# 注意：本 preset 不再挂载 `command-goal` / `tool-goal`——v0.2 已退役 `/answer`，
+# 不再需要「仅在 /goal 模式且标注 <请回答> 时才作答」的约定（见 project-learning-regulation R5）。
+
+# ── plan mode ───────────────────────────────────────────────────────────────
+
+# 计划状态本质上是 per-agent，故 entry-local realm 在此不是变通，而是正确的生命周期。
+- id: planning
+  name: cordis:group
+  group: true
+  isolate:
+    planMode: true
+  config:
+    - id: plan-mode
+      name: '@deepseek-ai/dsh-plan-mode'
+      config:
+        section: |
+              You are in plan mode. Stay in plan mode until exit_plan_mode succeeds or the user switches the session mode. Imperative language to implement changes means plan the implementation, not execute it. A user's conversational agreement — including an answer confirming something you asked — approves nothing and does not end plan mode; fold the confirmed decision into the plan and submit it through exit_plan_mode.
+
+              Explore first. Use non-mutating reads, searches, static analysis, and checks to ground the plan in the actual repository. Do not edit or write files, change configuration, run formatters or code generation that rewrites tracked files, commit, or otherwise carry out the plan. Prefer existing functions and patterns over new machinery.
+
+              The tool catalog stays the same across modes for request-cache stability. These plan-mode rules override any later tool description or guidance that suggests using mutation tools; those tools remain listed to keep the tool catalog unchanged. Do not use todo_write to track this planning phase: it tracks implementation after an approved plan, while the plan itself belongs in exit_plan_mode.
+
+              Resolve discoverable facts by inspection. Use ask_user_question only for user-owned choices or material ambiguity that inspection cannot answer. Do not ask the user where code lives or how current behavior works when you can find out.
+
+              Make the plan decision-complete: state the goal and success criteria; group implementation changes by subsystem; identify public API, schema, and data-flow changes; cover edge cases, failure modes, tests, acceptance criteria, and explicit assumptions. Keep it concise enough to review but detailed enough that another engineer can implement it without making design decisions.
+
+              When ready, call exit_plan_mode with the complete plan markdown, starting with a # title. Make exit_plan_mode the only and final tool call in that assistant response: it presents the plan for approval, and implementation begins only in a later step after approval. Do not paste the final plan as a plain reply or ask "should I proceed?" through prose or ask_user_question. If review rejects it, incorporate the feedback and present again. If the review channel is unavailable or aborted, stay in plan mode and ask the user to switch modes manually; do not proceed with implementation.
+
+# ── compaction ──────────────────────────────────────────────────────────────
+
+# `compaction-basic` 通过 `ctx.get` 读取 `toolResultPrune`，故 pruner 必须与之共享本 realm，
+# 而非置于其外。
+#
+# `tokenMeter` 刻意不在本 realm：meter 留在 HOST plane，此处的行解析那一个实例。它无配置、
+# 按 Session 键控每个 fold，并拥有浏览器为每个会话读取的 context-meter 投影单元——放进
+# realm 后这些单元会随恰好挂载的 preset 来来去去。preset 选择的是其 Agent 是否压缩上下文，
+# 即下面的 `compaction-basic`。
+- id: compaction
+  name: cordis:group
+  group: true
+  isolate:
+    compaction: true
+    toolResultPruner: true
+  config:
+    - id: compaction-basic
+      name: '@deepseek-ai/dsh-compaction-basic'
+
+    - id: command-compact
+      name: '@deepseek-ai/dsh-command-compact'
+
+    - id: tool-result-pruner
+      name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+      config:
+        thresholdChars: 8192
+        headChars: 4096
+        tailChars: 1024
+
+# ── delegation and workflows ────────────────────────────────────────────────
+
+# `subagents` 注册表及其 spawn/fork 后端留在 HOST 组合：注册表是进程单例，其跨会话查询由
+# api-proxy 提供给浏览器，且 provider 名只能注册一次。本 preset 贡献委托 TOOLS，它们解析
+# 该宿主注册表。
+#
+# `workflows` 不同——Agent 之外无人读取——故每个触及它的行在此共享一个 entry-local realm，
+# 而留在其外的消费者会解析到本 preset 并未填充的宿主注册表。
+#
+# `tool-subagent-report` 出于与注册表相同的原因属于 host-plane，而非 preset 可以不想要它：
+# 它在该单例上注册 CONTINUABLE SETUP 而非本 Agent 调用的工具，而 setup 列表不是 scope 感知
+# 的——每个挂载的 preset 一份拷贝意味着每个子代理会为每个存活会话注册一次 `report`，第二次
+# 即抛错。
+- id: delegation
+  name: cordis:group
+  group: true
+  isolate:
+    workflowEngine: true
+  config:
+    - id: tool-subagent-control
+      name: '@deepseek-ai/dsh-tool-subagent-control'
+
+    - id: tool-subagent-list-agents
+      name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+
+    - id: tool-subagent
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: spawn
+        toolName: subagent
+        modelSelectionSettings: true
+        backgroundMode: continuable
+
+    # Fork omits model selection so provider/model stay equal to the parent and
+    # the inherited history remains eligible for KV Cache reuse. This preset
+    # keeps fork continuable; parent and child inherit the same messaging tool,
+    # while the parent id and return guidance follow the inherited history.
+    - id: tool-subagent-fork
+      name: '@deepseek-ai/dsh-tool-subagent'
+      config:
+        provider: fork
+        toolName: subagent_fork
+        backgroundMode: continuable
+
+    # 产品 provider 是 host-plane 单例。复制本 preset 后，对任一普通工具行移除 `disabled`
+    # 即可仅向由该副本组合的 Agent 暴露对应产品。
+    - id: tool-subagent-codex
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: codex
+        toolName: subagent_codex
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: tool-subagent-claude-code
+      name: '@deepseek-ai/dsh-tool-subagent'
+      disabled: true
+      config:
+        provider: claude-code
+        toolName: subagent_claude_code
+        backgroundMode: one-shot
+        maxDepth: provider-managed
+
+    - id: workflow-worker-thread
+      name: '@deepseek-ai/dsh-workflow-worker-thread'
+      config:
+        provider: spawn
+
+    - id: tool-workflow
+      name: '@deepseek-ai/dsh-tool-workflow'
+
+    - id: tool-ralph
+      name: '@deepseek-ai/dsh-tool-ralph'
+      config:
+        subagentProvider: spawn
+        maxRounds: 64
+
+# ── remaining model-facing rows ─────────────────────────────────────────────
+
+- id: tool-ask-user
+  name: '@deepseek-ai/dsh-tool-ask-user'
+
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# `web` service 及其搜索 provider 留在宿主组合；只有面向模型的工具是 per-session。
+# fetch 关闭、search 保留：项目学习以本地为准；前置知识与延伸阅读可按需检索（联网始终
+# 允许），引用标注来源、未验证内容如实标注。
+- id: tool-web
+  name: '@deepseek-ai/dsh-tool-web'
+  config:
+    fetch: false
+    searchTimeoutMs: 60000

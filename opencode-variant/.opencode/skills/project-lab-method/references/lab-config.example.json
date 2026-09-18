@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "repoRoot": "../../../..",
+  "lab": { "index": 1, "slug": "add-command", "title": "加一个新指令" },
+  "threshold": 100,
+  "rulesWeight": 15,
+  "planDir": "learning_plan",
+  "tests": [
+    {
+      "id": "unit",
+      "label": "项目单元测试",
+      "command": "npm test",
+      "cwd": ".",
+      "weight": 3,
+      "timeoutMs": 120000
+    },
+    {
+      "id": "smoke",
+      "label": "端到端冒烟",
+      "command": "npm run smoke",
+      "cwd": ".",
+      "weight": 1,
+      "timeoutMs": 120000
+    }
+  ],
+  "rules": {
+    "forbiddenPaths": ["test/**", "labs/**", "package-lock.json"],
+    "requiredFiles": ["src/command.ts"],
+    "forbiddenPatterns": [
+      { "pattern": "TODO\\(你来实现\\)", "glob": "src/**/*.ts", "message": "src/ 中仍有关键实现未完成（TODO）" },
+      { "pattern": "process\\.exit\\(0\\)\\s*;?\\s*//\\s*(test|样例)", "glob": "src/**/*.ts", "message": "疑似针对样例特判" }
+    ],
+    "maxAddedLines": null
+  }
+}

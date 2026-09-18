@@ -1,0 +1,48 @@
+{
+  "name": "pi-project-learning",
+  "version": "0.1.0",
+  "private": true,
+  "description": "问题驱动 · 做中学 · 以 Lab 为中心的 Pi 项目学习插件：/profile /read /lab + 学习模式写入守卫（含评分文件保护）+ learning_* 工具",
+  "keywords": [
+    "pi-package",
+    "project-based-learning",
+    "education",
+    "learning"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    ".pi",
+    "scripts",
+    "README.md",
+    "LICENSE"
+  ],
+  "pi": {
+    "extensions": [
+      "./.pi/extensions/project-learning/index.ts"
+    ],
+    "skills": [
+      "./.pi/skills"
+    ],
+    "prompts": [
+      "./.pi/prompts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.3",
+    "tsx": "^4.19.0",
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "test": "node --import tsx --test tests/guard.test.ts tests/plan.test.ts tests/extension.test.ts tests/resources.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "check:variants": "node scripts/sync-variants.mjs --check",
+    "sync:variants": "node scripts/sync-variants.mjs"
+  }
+}

@@ -1,0 +1,13 @@
+# 依赖与生成物（可 npm install 再生）
+node_modules/
+
+# 本地临时/日志
+*.log
+.DS_Store
+Thumbs.db
+.tmp*/
+*.tgz
+
+# 编辑器
+.idea/
+.vscode/

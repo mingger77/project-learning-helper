@@ -1,33 +1,68 @@
-# 项目学习模式（project-learning preset）
+# 项目学习模式（以 Lab 为中心）—— 三端实现
 
-人利用 AI 辅助进行项目式学习的 DeepSeek Harness Agent 预设：以模块数/业务复杂度分档阅读项目，在项目根 `learning_plan/<项目名>/` 下产出四份文档——`STUDENT.md`（学生学案）、`TEACHER.md`（老师/AI 备课解析）、`QUESTION.md`（问答日志）、`KNOWLEDGE.md`（前置知识详解，每知识点附真实检验网址）；除 `learning_plan/` 目录外，项目其余文件一律只读。
+**问题驱动 · 做中学 · 以 Lab 为中心**的项目学习模式，同一套方法论分别落地到三个 Harness：
 
-## 组成
+| 变体 | 目录 | 交付形态 | 命令面 | 写权限落地 |
+|---|---|---|---|---|
+| **Pi** | `pi-plugin/.pi/` | 开箱即用 `.pi/` 文件夹（+ 可选 npm/git 包） | `/profile` `/read` `/lab`（Prompt Templates）+ `/learning` | 扩展**硬拦截**越界写入 + 保护评分文件（R9） |
+| **OpenCode** | `opencode-variant/.opencode/` | 全局或按项目安装的 `.opencode/` | `/profile` `/read` `/lab`（commands） | agent permission（`edit` 仅 `learning_plan/**`，评分文件显式 deny） |
+| **DSH** | `project-learning-preset/` | Agent 预设（复制到 `.agent-presets/`） | 无斜杠命令，用**触发语** | persona + 元规则（模型级纪律） |
 
-- `agent.cordis.yml` —— 预设组合（以 `standard` 为基线；差异：项目学习 persona、`skills/` 挂载、`tool-web` 关闭 fetch、补回 `command-goal`）
-- `preset.yml` —— 预设元数据（name / description / order: 7）
-- `skills/` —— 7 个技能：
-  - `project-learning-main` —— 顶层调度（分档 → 询问与双确认 → 五档策略 → 产出四文件）
-  - `project-learning-regulation` —— 元规则（证据可追溯、只读 + `learning_plan/` 唯一可写、输出命名、范围协商、`/goal` 作答规则、检验网址规则 R9）
-  - `project-reading-method` —— 复杂度判据与五档阅读策略 + 「导演式阅读」五轮法
-  - `project-doc-student` —— `STUDENT.md` 学案规范（11 节；§3 前置知识单链接指向 KNOWLEDGE.md）
-  - `project-doc-teacher` —— `TEACHER.md` 备课解析规范（9 节）
-  - `project-doc-question` —— `QUESTION.md` 问答日志规范（含 `/goal` 模式 `<请回答>` 作答规则）
-  - `project-doc-knowledge` —— `KNOWLEDGE.md` 前置知识详解规范（6 节，每知识点附真实检验网址）
-- `LICENSE` —— MIT
+## 设计要点（v0.2 · 以 Lab 为中心）
 
-## 安装
+1. **一个 Lab = 一个阶段**：每个 Lab 都具备 handout、规则、可运行评分与复盘，用分数决定是否推进。
+2. **Lab 五要素**：目标概念 / 驱动问题 / handout（`LAB.md`）/ 规则与评分（`lab.config.json` + `autograder/`）/ 复盘（`REPORT.md`）。
+3. **评分 = 项目既有命令 + 规则检查**：不造 bespoke 测试题库、不设隐藏测试；`threshold` 默认 100，结果写 `autograder/last-result.json`。
+4. **三个流程**：`/profile`（画像）→ `/read`（地图与可实验点）→ `/lab`（new / grade / review / list，可反复跑分形成闭环）。
+5. **推进判定**：`评分 ≥ 阈值` ∧ `驱动问题已答（或显式推迟）` ∧ `REPORT.md` 已填——由状态与分数决定，不看轮数或篇幅。
+6. **写权限**：AI 只写 `learning_plan/`；`labs/*/LAB.md`、`labs/*/lab.config.json`、`labs/*/autograder/**` 与项目既有测试生成后**不得修改**（元规则 R9）。
+7. **做减法**：文档只留 `MAP.md` / `PROFILE.md` / `LOG.md` / `others/项目解析.md` + 每个 Lab 自己的目录；`KNOWLEDGE.md`、`stages/`、`/ask`、`/build`、`/answer` 均已退役（内容已迁移，未丢失）。
+8. **单一技能源**：7 个技能的正文可移植，canonical 源在 `pi-plugin/.pi/skills/`，由 `pi-plugin/scripts/sync-variants.mjs` 同步到三端。
 
-1. 将本目录复制到 `${DSH_HOME:-$HOME/.dsh}/.agent-presets/project-learning/`（每个预设一个同级目录，id 与目录名一致）。
-2. 挂载校验：`agentPresets.standingKeyFor('project-learning')` 返回 `mounted OK` 即生效。
-3. 在 Web GUI 新开会话，预设选择「项目学习模式」。
+## 核心约定
 
-## 使用
+```text
+learning_plan/<项目名>/
+├── MAP.md        # 指路：总目标 / 驱动问题 / ## Labs（驱动问题·状态·评分·LAB.md 链接）
+├── PROFILE.md    # 我是谁：画像 + 实验评分偏好 + 前置自检（与 MAP 同等重要）
+├── LOG.md        # 发生了什么：性质 onboarding|ask|grade|completion|commit
+├── labs/NN-<slug>/
+│   ├── LAB.md              # handout（目标概念/驱动问题/背景/规则/评分构成/四层提示/交付物）
+│   ├── lab.config.json     # tests + rules + threshold + repoRoot（生成后 AI 不得改）
+│   ├── scaffold/           # 起步文件，关键实现 # TODO(你来实现)
+│   ├── autograder/         # check-rules.mjs / grade.mjs / last-result.json（零依赖）
+│   └── REPORT.md           # 复盘（含 grading 区块）
+└── others/       # 项目解析.md：事实层 + 验证命令清单 + 可实验点清单 + 概念速查
+```
 
-对目标项目说「学习/阅读这个项目」，Agent 将执行：复杂度分档（判据写入 `TEACHER.md` §0/§1）→ 询问学习者背景（编程水平/目标/想学知识/已有经验/文档偏好）与双确认 → 按档位策略阅读 → 产出 `learning_plan/<项目名>/` 四份文档（TEACHER → KNOWLEDGE → STUDENT → QUESTION）。
+- **一次一个 Lab**；Lab 推进判定 = `评分 ≥ 阈值` ∧ `驱动问题已答（或显式推迟）` ∧ `REPORT.md 已填`。
+- 评分 = **项目既有命令** + 规则检查（不得改测试/必须文件/禁止写法），`threshold` 默认 100，结果写 `autograder/last-result.json`。
+- 7 个技能：`project-learning-main`、`project-learning-regulation`、`project-lab-method`、`project-reading-method`、`project-doc-map`、`project-doc-profile`、`project-doc-log`。
+- `KNOWLEDGE.md`、`stages/`、`/ask`、`/build`、`/answer` 均已退役。
 
-学生先做 `KNOWLEDGE.md` §1 知识自检，缺失项按详解学习并用检验网址自测；提问在 `QUESTION.md` 中追加；AI 仅在 `/goal` 模式且问题标注 `<请回答>` 时回答。
+## 单一技能源 + 同步
 
-## 许可证
+7 个技能的正文是**可移植**的，canonical 源在 **`pi-plugin/.pi/skills/`**：
 
-MIT License，详见 [LICENSE](LICENSE)。
+```bash
+cd pi-plugin
+node scripts/sync-variants.mjs          # 同步到 opencode-variant 与 project-learning-preset
+node scripts/sync-variants.mjs --check  # 校验三处逐字节一致
+```
+
+Harness 差异全部写在技能的「Harness 集成」小节里，因此同步就是整目录替换，不需要按端改写。
+
+## 快速验证
+
+```bash
+# Pi：类型 + 单测（33 项）+ 真实加载
+cd pi-plugin && npm run typecheck && npm test
+pi --mode rpc -e ./pi-plugin   # 发 {"type":"get_commands"} 可见 /profile /read /lab + 7 技能
+
+# OpenCode：技能 / 代理 / 命令面
+cd ../opencode-variant && opencode debug skill && opencode debug agent project-learning && opencode debug config
+
+# DSH：预设 YAML 与行集合
+#   复制 project-learning-preset/ 到 ${DSH_HOME:-~/.dsh}/.agent-presets/project-learning/
+#   agentPresets.standingKeyFor('project-learning') === 'mounted OK'
+```
